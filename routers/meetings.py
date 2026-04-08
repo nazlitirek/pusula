@@ -72,9 +72,13 @@ def update_request_status(request_id: int, status: str, db: Session = Depends(ge
     request = db.query(models.MeetingRequest).filter(models.MeetingRequest.id == request_id).first()
     if not request:
         raise HTTPException(status_code=404, detail="Talep bulunamadı")
-    if request.mentor_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Bu talebi onaylama yetkiniz yok")
     
-    request.status = status
+    if request.mentor_id != current_user.id:  # type: ignore
+        raise HTTPException(status_code=403, detail="Bu talebi onaylama yetkiniz yok")
+
+    db.query(models.MeetingRequest).filter(
+        models.MeetingRequest.id == request_id
+    ).update({"status": status}, synchronize_session=False)
+    
     db.commit()
-    return request
+    return {"message": f"Talep {status} olarak güncellendi"}
