@@ -50,7 +50,7 @@ def add_interests(interest_ids: list[int], db: Session = Depends(get_db), curren
     db.commit()
     return {"message": "İlgi alanları güncellendi!"}
 
-@router.get("/interests")
-def get_interests(db: Session = Depends(get_db)):
-    interests = db.query(models.Interest).all()
+@router.get("/my-interests")
+def get_my_interests(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    interests = db.query(models.UserInterest).filter(models.UserInterest.user_id == current_user.id).all()
     return interests
