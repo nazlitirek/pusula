@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine
 import models
-from routers import auth, users, meetings
+from routers import auth, users, meetings, matching
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -19,6 +19,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(meetings.router)
+app.include_router(matching.router)
 
 @app.get("/")
 def read_root():
