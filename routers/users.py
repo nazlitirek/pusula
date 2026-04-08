@@ -37,6 +37,11 @@ def get_profile(current_user: models.User = Depends(get_current_user)):
         "is_graduate": current_user.is_graduate
     }
 
+@router.get("/interests")
+def get_interests(db: Session = Depends(get_db)):
+    interests = db.query(models.Interest).all()
+    return interests
+
 @router.post("/interests")
 def add_interests(interest_ids: list[int], db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     # Önce mevcut ilgi alanlarını sil
