@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Time
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Time,Date
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from database import Base
@@ -44,6 +44,7 @@ class MeetingRequest(Base):
     mentor_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     availability_id = Column(Integer, ForeignKey("availability.id", ondelete="CASCADE"))
     meeting_time = Column(DateTime, nullable=False)
+    meeting_date = Column(Date, nullable=True)
     status = Column(String(20), default="pending")
     created_at = Column(DateTime, server_default=func.now())
 

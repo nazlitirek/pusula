@@ -59,3 +59,16 @@ def add_interests(interest_ids: list[int], db: Session = Depends(get_db), curren
 def get_my_interests(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     interests = db.query(models.UserInterest).filter(models.UserInterest.user_id == current_user.id).all()
     return interests
+
+@router.get("/mentor/{mentor_id}")
+def get_mentor(mentor_id: int, db: Session = Depends(get_db)):
+    mentor = db.query(models.User).filter(models.User.id == mentor_id).first()
+    if not mentor:
+        raise HTTPException(status_code=404, detail="Mentor bulunamadı")
+    return {
+        "id": mentor.id,
+        "name": mentor.name,
+        "role": mentor.role,
+        "class_year": mentor.class_year,
+        "is_graduate": mentor.is_graduate
+    }

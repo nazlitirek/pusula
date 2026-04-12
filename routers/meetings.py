@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 from routers.users import get_current_user
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Time
+from datetime import date as DateType
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
 
@@ -27,30 +28,92 @@ def add_availability(day: str, start_time: str, end_time: str, db: Session = Dep
 
 # Mentor müsaitliklerini getir
 @router.get("/availability/{mentor_id}")
-def get_availability(mentor_id: int, db: Session = Depends(get_db)):
-    availability = db.query(models.Availability).filter(models.Availability.mentor_id == mentor_id).all()
-    return availability
-
+def get_availability(mentor_id: int, date: str = None, db: Session = Depends(get_db)):
+    availabilities = db.query(models.Availability).filter(
+        models.Availability.mentor_id == mentor_id
+    ).all()
+    
+    result = []
+    for a in availabilities:
+        is_booked = False
+        if date:
+            selected_date = DateType.fromisoformat(date)
+            existing = db.query(models.MeetingRequest).filter(
+                models.MeetingRequest.availability_id == a.id,
+                models.MeetingRequest.meeting_date == selected_date,
+                models.MeetingRequest.status.in_(["pending", "accepted"])  # type: ignore
+            ).first()
+            is_booked = existing is not None
+        
+        result.append({
+            "id": a.id,
+            "mentor_id": a.mentor_id,
+            "day": a.day,
+            "start_time": str(a.start_time),
+            "end_time": str(a.end_time),
+            "is_booked": is_booked
+        })
+    
+    return result
 # Toplantı talebi gönder
+
+
 @router.post("/request")
 def send_meeting_request(mentor_id: int, availability_id: int, meeting_time: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     # İlgi alanı kontrolü
     interests = db.query(models.UserInterest).filter(models.UserInterest.user_id == current_user.id).all()
     if not interests:
         raise HTTPException(status_code=400, detail="Önce ilgi alanı seçmelisin")
-    
+
+    meeting_datetime = datetime.fromisoformat(meeting_time)
+    meeting_date = meeting_datetime.date()
+
+    # Haftada max 2 toplantı kontrolü
+    week_start = meeting_date - timedelta(days=meeting_date.weekday())
+    week_end = week_start + timedelta(days=6)
+    weekly_requests = db.query(models.MeetingRequest).filter(
+        models.MeetingRequest.mentee_id == current_user.id,
+        models.MeetingRequest.meeting_date >= week_start,
+        models.MeetingRequest.meeting_date <= week_end,
+        models.MeetingRequest.status.in_(["pending", "accepted"])  # type: ignore
+    ).count()
+    if weekly_requests >= 2:
+        raise HTTPException(status_code=400, detail="Bu hafta maksimum 2 toplantı talebinde bulunabilirsin")
+
+    # Aynı mentörle 7 gün içinde toplantı kontrolü
+    next_7_days = meeting_date + timedelta(days=7)
+    existing_with_mentor = db.query(models.MeetingRequest).filter(
+        models.MeetingRequest.mentee_id == current_user.id,
+        models.MeetingRequest.mentor_id == mentor_id,
+        models.MeetingRequest.meeting_date >= meeting_date,
+        models.MeetingRequest.meeting_date <= next_7_days,
+        models.MeetingRequest.status.in_(["pending", "accepted"])  # type: ignore
+    ).first()
+    if existing_with_mentor:
+        raise HTTPException(status_code=400, detail="Bu mentörle önümüzdeki 7 gün içinde zaten bir toplantınız var")
+
+    # Aynı tarih ve saate çift talep kontrolü
+    existing = db.query(models.MeetingRequest).filter(
+        models.MeetingRequest.mentor_id == mentor_id,
+        models.MeetingRequest.availability_id == availability_id,
+        models.MeetingRequest.meeting_date == meeting_date,
+        models.MeetingRequest.status.in_(["pending", "accepted"])  # type: ignore
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Bu saat dolu, lütfen başka bir zaman seçin")
+
     meeting_request = models.MeetingRequest(
         mentee_id=current_user.id,
         mentor_id=mentor_id,
         availability_id=availability_id,
-        meeting_time=datetime.fromisoformat(meeting_time),
+        meeting_time=meeting_datetime,
+        meeting_date=meeting_date,
         status="pending"
     )
     db.add(meeting_request)
     db.commit()
     db.refresh(meeting_request)
     return meeting_request
-
 # Gelen talepleri getir (mentor için)
 @router.get("/incoming")
 def get_incoming_requests(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
