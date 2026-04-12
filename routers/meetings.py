@@ -145,3 +145,50 @@ def update_request_status(request_id: int, status: str, db: Session = Depends(ge
     
     db.commit()
     return {"message": f"Talep {status} olarak güncellendi"}
+
+
+@router.get("/upcoming")
+def get_upcoming_meetings(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    today = datetime.now()
+    
+    meetings = db.query(models.MeetingRequest).filter(
+        models.MeetingRequest.status == "accepted",
+        models.MeetingRequest.meeting_time >= today,
+        (models.MeetingRequest.mentee_id == current_user.id) |  # type: ignore
+        (models.MeetingRequest.mentor_id == current_user.id)
+    ).all()
+    
+    return [
+        {
+            "id": m.id,
+            "mentee_id": m.mentee_id,
+            "mentor_id": m.mentor_id,
+            "meeting_time": m.meeting_time,
+            "meeting_date": m.meeting_date,
+            "status": m.status
+        }
+        for m in meetings
+    ]
+
+@router.get("/past")
+def get_past_meetings(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    today = datetime.now()
+    
+    meetings = db.query(models.MeetingRequest).filter(
+        (models.MeetingRequest.meeting_time < today) |  # type: ignore
+        (models.MeetingRequest.status == "rejected"),
+        (models.MeetingRequest.mentee_id == current_user.id) |  # type: ignore
+        (models.MeetingRequest.mentor_id == current_user.id)
+    ).all()
+    
+    return [
+        {
+            "id": m.id,
+            "mentee_id": m.mentee_id,
+            "mentor_id": m.mentor_id,
+            "meeting_time": m.meeting_time,
+            "meeting_date": m.meeting_date,
+            "status": m.status
+        }
+        for m in meetings
+    ]

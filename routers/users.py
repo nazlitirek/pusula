@@ -37,6 +37,29 @@ def get_profile(current_user: models.User = Depends(get_current_user)):
         "is_graduate": current_user.is_graduate
     }
 
+@router.get("/profile/{user_id}")
+def get_user_profile(user_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+    
+    user_interests = db.query(models.UserInterest).filter(
+        models.UserInterest.user_id == user_id
+    ).all()
+    
+    interest_ids = [ui.interest_id for ui in user_interests]
+    interests = db.query(models.Interest).filter(
+        models.Interest.id.in_(interest_ids)  # type: ignore
+    ).all()
+    
+    return {
+        "id": user.id,
+        "name": user.name,
+        "role": user.role,
+        "class_year": user.class_year,
+        "is_graduate": user.is_graduate,
+        "interests": [{"id": i.id, "name": i.name} for i in interests]
+    }
 @router.get("/interests")
 def get_interests(db: Session = Depends(get_db)):
     interests = db.query(models.Interest).all()
@@ -72,3 +95,20 @@ def get_mentor(mentor_id: int, db: Session = Depends(get_db)):
         "class_year": mentor.class_year,
         "is_graduate": mentor.is_graduate
     }
+
+@router.get("/mentors")
+def get_all_mentors(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    mentors = db.query(models.User).filter(
+        models.User.role.in_(["mentor", "both"]),  # type: ignore
+        models.User.id != current_user.id
+    ).all()
+    return [
+        {
+            "id": m.id,
+            "name": m.name,
+            "role": m.role,
+            "class_year": m.class_year,
+            "is_graduate": m.is_graduate
+        }
+        for m in mentors
+    ]
