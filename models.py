@@ -14,6 +14,7 @@ class User(Base):
     class_year = Column(String(20), nullable=True)
     is_graduate = Column(Boolean, default=False)
     created_at = Column(DateTime, server_default=func.now())
+    bio = Column(String, nullable=True)
 
 class Interest(Base):
     __tablename__ = "interests"

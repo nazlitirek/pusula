@@ -3,13 +3,26 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 from routers.users import get_current_user
-from datetime import datetime, timedelta
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Time
-from datetime import date as DateType
+from datetime import datetime, timedelta, date as DateType
+from typing import Optional
+
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
 
-# Mentor müsaitlik ekle
+def format_meeting(m, db):
+    mentee = db.query(models.User).filter(models.User.id == m.mentee_id).first()
+    mentor = db.query(models.User).filter(models.User.id == m.mentor_id).first()
+    return {
+        "id": m.id,
+        "mentee_id": m.mentee_id,
+        "mentee_name": mentee.name if mentee else f"#{m.mentee_id}",
+        "mentor_id": m.mentor_id,
+        "mentor_name": mentor.name if mentor else f"#{m.mentor_id}",
+        "meeting_time": m.meeting_time,
+        "meeting_date": m.meeting_date,
+        "status": m.status
+    }
+
 @router.post("/availability")
 def add_availability(day: str, start_time: str, end_time: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     if current_user.role not in ["mentor", "both"]:
@@ -26,9 +39,8 @@ def add_availability(day: str, start_time: str, end_time: str, db: Session = Dep
     db.refresh(availability)
     return availability
 
-# Mentor müsaitliklerini getir
 @router.get("/availability/{mentor_id}")
-def get_availability(mentor_id: int, date: str = None, db: Session = Depends(get_db)):
+def get_availability(mentor_id: int, date: Optional[str] = None, db: Session = Depends(get_db)):
     availabilities = db.query(models.Availability).filter(
         models.Availability.mentor_id == mentor_id
     ).all()
@@ -55,12 +67,9 @@ def get_availability(mentor_id: int, date: str = None, db: Session = Depends(get
         })
     
     return result
-# Toplantı talebi gönder
-
 
 @router.post("/request")
 def send_meeting_request(mentor_id: int, availability_id: int, meeting_time: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    # İlgi alanı kontrolü
     interests = db.query(models.UserInterest).filter(models.UserInterest.user_id == current_user.id).all()
     if not interests:
         raise HTTPException(status_code=400, detail="Önce ilgi alanı seçmelisin")
@@ -68,7 +77,6 @@ def send_meeting_request(mentor_id: int, availability_id: int, meeting_time: str
     meeting_datetime = datetime.fromisoformat(meeting_time)
     meeting_date = meeting_datetime.date()
 
-    # Haftada max 2 toplantı kontrolü
     week_start = meeting_date - timedelta(days=meeting_date.weekday())
     week_end = week_start + timedelta(days=6)
     weekly_requests = db.query(models.MeetingRequest).filter(
@@ -80,7 +88,6 @@ def send_meeting_request(mentor_id: int, availability_id: int, meeting_time: str
     if weekly_requests >= 2:
         raise HTTPException(status_code=400, detail="Bu hafta maksimum 2 toplantı talebinde bulunabilirsin")
 
-    # Aynı mentörle 7 gün içinde toplantı kontrolü
     next_7_days = meeting_date + timedelta(days=7)
     existing_with_mentor = db.query(models.MeetingRequest).filter(
         models.MeetingRequest.mentee_id == current_user.id,
@@ -92,7 +99,6 @@ def send_meeting_request(mentor_id: int, availability_id: int, meeting_time: str
     if existing_with_mentor:
         raise HTTPException(status_code=400, detail="Bu mentörle önümüzdeki 7 gün içinde zaten bir toplantınız var")
 
-    # Aynı tarih ve saate çift talep kontrolü
     existing = db.query(models.MeetingRequest).filter(
         models.MeetingRequest.mentor_id == mentor_id,
         models.MeetingRequest.availability_id == availability_id,
@@ -114,19 +120,21 @@ def send_meeting_request(mentor_id: int, availability_id: int, meeting_time: str
     db.commit()
     db.refresh(meeting_request)
     return meeting_request
-# Gelen talepleri getir (mentor için)
+
 @router.get("/incoming")
 def get_incoming_requests(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    requests = db.query(models.MeetingRequest).filter(models.MeetingRequest.mentor_id == current_user.id).all()
-    return requests
+    requests = db.query(models.MeetingRequest).filter(
+        models.MeetingRequest.mentor_id == current_user.id
+    ).all()
+    return [format_meeting(r, db) for r in requests]
 
-# Giden talepleri getir (mentee için)
 @router.get("/outgoing")
 def get_outgoing_requests(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    requests = db.query(models.MeetingRequest).filter(models.MeetingRequest.mentee_id == current_user.id).all()
-    return requests
+    requests = db.query(models.MeetingRequest).filter(
+        models.MeetingRequest.mentee_id == current_user.id
+    ).all()
+    return [format_meeting(r, db) for r in requests]
 
-# Talebi onayla veya reddet
 @router.put("/request/{request_id}")
 def update_request_status(request_id: int, status: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     if status not in ["accepted", "rejected"]:
@@ -135,17 +143,15 @@ def update_request_status(request_id: int, status: str, db: Session = Depends(ge
     request = db.query(models.MeetingRequest).filter(models.MeetingRequest.id == request_id).first()
     if not request:
         raise HTTPException(status_code=404, detail="Talep bulunamadı")
-    
     if request.mentor_id != current_user.id:  # type: ignore
         raise HTTPException(status_code=403, detail="Bu talebi onaylama yetkiniz yok")
-
+    
     db.query(models.MeetingRequest).filter(
         models.MeetingRequest.id == request_id
     ).update({"status": status}, synchronize_session=False)
     
     db.commit()
     return {"message": f"Talep {status} olarak güncellendi"}
-
 
 @router.get("/upcoming")
 def get_upcoming_meetings(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
@@ -158,17 +164,7 @@ def get_upcoming_meetings(db: Session = Depends(get_db), current_user: models.Us
         (models.MeetingRequest.mentor_id == current_user.id)
     ).all()
     
-    return [
-        {
-            "id": m.id,
-            "mentee_id": m.mentee_id,
-            "mentor_id": m.mentor_id,
-            "meeting_time": m.meeting_time,
-            "meeting_date": m.meeting_date,
-            "status": m.status
-        }
-        for m in meetings
-    ]
+    return [format_meeting(m, db) for m in meetings]
 
 @router.get("/past")
 def get_past_meetings(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
@@ -181,14 +177,4 @@ def get_past_meetings(db: Session = Depends(get_db), current_user: models.User =
         (models.MeetingRequest.mentor_id == current_user.id)
     ).all()
     
-    return [
-        {
-            "id": m.id,
-            "mentee_id": m.mentee_id,
-            "mentor_id": m.mentor_id,
-            "meeting_time": m.meeting_time,
-            "meeting_date": m.meeting_date,
-            "status": m.status
-        }
-        for m in meetings
-    ]
+    return [format_meeting(m, db) for m in meetings]

@@ -4,6 +4,8 @@ from database import get_db
 import models
 from jose import jwt, JWTError
 from fastapi.security import OAuth2PasswordBearer
+from typing import Optional
+from routers.auth import hash_password, verify_password
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -34,8 +36,25 @@ def get_profile(current_user: models.User = Depends(get_current_user)):
         "email": current_user.email,
         "role": current_user.role,
         "class_year": current_user.class_year,
-        "is_graduate": current_user.is_graduate
+        "is_graduate": current_user.is_graduate,
+        "bio": current_user.bio,
     }
+
+@router.put("/me")
+def update_profile(name: Optional[str] = None, class_year: Optional[str] = None, bio: Optional[str] = None, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    update_data = {}
+    if name is not None and name.strip():
+        update_data["name"] = name
+    if class_year is not None and class_year.strip():
+        update_data["class_year"] = class_year
+    if bio is not None:
+        update_data["bio"] = bio.strip()
+    
+    if update_data:
+        db.query(models.User).filter(models.User.id == current_user.id).update(update_data, synchronize_session=False)
+        db.commit()
+    
+    return {"message": "Profil güncellendi!"}
 
 @router.get("/profile/{user_id}")
 def get_user_profile(user_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
@@ -58,6 +77,7 @@ def get_user_profile(user_id: int, db: Session = Depends(get_db), current_user: 
         "role": user.role,
         "class_year": user.class_year,
         "is_graduate": user.is_graduate,
+        "bio": user.bio,
         "interests": [{"id": i.id, "name": i.name} for i in interests]
     }
 @router.get("/interests")
@@ -112,3 +132,49 @@ def get_all_mentors(db: Session = Depends(get_db), current_user: models.User = D
         }
         for m in mentors
     ]
+
+@router.put("/change-password")
+def change_password(old_password: str, new_password: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    if not verify_password(old_password, current_user.password):
+        raise HTTPException(status_code=400, detail="Mevcut şifre hatalı")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Yeni şifre en az 6 karakter olmalı")
+    
+    hashed = hash_password(new_password)
+    db.query(models.User).filter(models.User.id == current_user.id).update(
+        {"password": hashed}, synchronize_session=False
+    )
+    db.commit()
+    return {"message": "Şifre güncellendi!"}
+
+
+@router.get("/stats")
+def get_stats(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    total_matches = db.query(models.Match).filter(
+        (models.Match.mentee_id == current_user.id) |  # type: ignore
+        (models.Match.mentor_id == current_user.id)
+    ).count()
+
+    total_meetings = db.query(models.MeetingRequest).filter(
+        (models.MeetingRequest.mentee_id == current_user.id) |  # type: ignore
+        (models.MeetingRequest.mentor_id == current_user.id),
+        models.MeetingRequest.status == "accepted"
+    ).count()
+
+    return {
+        "total_matches": total_matches,
+        "total_meetings": total_meetings
+    }
+
+@router.get("/my-interests/details")
+def get_my_interest_details(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    user_interests = db.query(models.UserInterest).filter(
+        models.UserInterest.user_id == current_user.id
+    ).all()
+    
+    interest_ids = [ui.interest_id for ui in user_interests]
+    interests = db.query(models.Interest).filter(
+        models.Interest.id.in_(interest_ids)  # type: ignore
+    ).all()
+    
+    return [{"id": i.id, "name": i.name} for i in interests]
